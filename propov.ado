@@ -1,28 +1,31 @@
-*! v BETA: 2.2.1	<24Mar2015>		
-*! add option macrodata for selection of GDP projection
-*! Add option to modifying monthly conversion
+*! v BETA: 2.3.1	<21Jul2015>		
+*! Options write and method to modify MFM file
+*! 	Options gfn* and pl*gn* for MFM files
+*!	Reiteration included for subsequent projected years
 
 /*===========================================================================
-project:       Calculate poverty projections based quantile-to-growth contribution, 
+project: Calculate poverty projections based quantile-to-growth contribution, 
 				elasticity and Neutral distribution
-Author:        Andres Castaneda 
-Dependencies:  The World Bank
+Author: Andres Castaneda 
+Dependencies: The World Bank
 ---------------------------------------------------------------------------
-Creation Date:     February 5, 2015 
-Modification Date: February 24, 2015   
-Do-file version:    06
-References:          
-Output:             excel and dta file
+Creation Date: February 5, 2015 
+Modification Date: February 24, 2015 
+				 July 08, 2015
+				 July 21, 2015
+Do-file version: 06
+References: 
+Output: excel and dta file
 ===========================================================================*/
 
 /*=======================================================================================
-                                  0: Program set up            
+ 0: Program set up 
 =======================================================================================*/
 version 12
 
 program define propov, rclass
 
-syntax  [anything(name=lookup)], 					///
+syntax [anything(name=lookup)], 					///
 		COUNtry(string)								///
 		PERiod(numlist min=2 max=2 sort)			///
 		[											///
@@ -38,21 +41,24 @@ syntax  [anything(name=lookup)], 					///
 		region(string)								/// uses lac data
 		annualized									/// annualized growth and poverty for elasticity
 		welfvar(string)								///
-		DISTribution(string)						///  democratic or plutocratic distribution of income within quantile 
-		CONTribution(string)						///  Select mean or sum of each quantile
-		method(string)								///
+		DISTribution(string)						/// democratic or plutocratic distribution of income within quantile 
+		CONTribution(string)						/// Select mean or sum of each quantile
 		MACROdata(string)							///
 		MONTHly(string)								/// default 30.42
 		write										/// write on final spreadsheet.
+		method(string)								///
+			gfn1(string) gfn2(string) gfn3(string) gfn4(string) ///
+			pl1fn1(string) pl1fn2(string) pl1fn3(string) pl1fn4(string) ///
+			pl2fn1(string) pl2fn2(string) pl2fn3(string) pl2fn4(string) ///
+			pl3fn1(string) pl3fn2(string) pl3fn3(string) pl3fn4(string) ///
 		]
 
-		
 ** -------------------------- 0.1 Considerations and defaults
 * Check latest version
 qui adoupdate propov
 if (strmatch( "`r(pkglist)'","propov" ) & "${propovpopup}" != "check") {
 	cap window stopbox note "A new version of -propov- has been released." ///
-		"To update -propov- you can do one of the following:"  ///
+		"To update -propov- you can do one of the following:" ///
 		"i) Follow instruction on screen, or ii) type propov_update in stata." ///
 		"If you don't want to update, this message will pop up next time you open Stata and use -propov-"
 	global propovpopup "check"
@@ -82,23 +88,82 @@ if ("`contribution'" == "mean") local gdp2use "pc"
 * Monthly factor for poverty line. 
 if ("`monthly'" == "") local monthly = 30.42
 
+* Write and method
+if ("`write'" == "write" & "`method'" == "") {
+	noi disp in r "You must specify option method() jointly with option write:" ///
+	in y _n _col(4) "1 or qgc" _n _col(4) "2 or elasticity" ///
+	_n _col(4) "3 or neutral"
+	error
+}
+if ("`write'" == "write" & "`method'" != "") {
+
+	** Condition if method is integer
+	cap confirm integer number `method'
+	if (_rc == 0 ) {
+	
+		cap assert inlist(`method', 1, 2, 3) 
+		if _rc {
+		
+			noi disp in r "option method must have one of the following values:" ///
+				in y _n _col(4) "1 or qgc" _n _col(4) "2 or elasticity" ///
+				_n _col(4) "3 or neutral"
+			error
+		
+		}
+		
+		else {
+		
+			if (`method' == 1) local method "QGC"
+			else if (`method' == 2) local method "Elasticity"
+			else local method "Neutral Distribution"
+		
+		}	// end of condition for integer == 1 | 2 | 3
+	}	// end of condition for method as integer
+	
+	* condition if method is string
+	else {
+		local method = lower("`method'")
+		cap assert inlist("`method'", "qgc", "elasticity", "neutral")
+		if _rc {
+		
+			noi disp in r "option method must have one of the following values:" ///
+				in y _n _col(4) "1 or qgc" _n _col(4) "2 or elasticity" ///
+				_n _col(4) "3 or neutral"
+			error
+		
+		}
+		
+		else {
+		
+			if ("`method'" == "qgc") local method "QGC"
+			if ("`method'" == "elasticity") local method "Elasticity"
+			if ("`method'" == "neutral") local method "Neutral Distribution"
+		
+		}	// end of condition for string == qgc | elasticity | neutral
+	}	// end of condition if method is string
+}	// end of condition for method option 
+
+
+
 ** ----------------------------- 0.2 General Variables
 
 
 if ("`region'" == "") {
-	if ("`welfvar'" == "") local welfvar  "welfare" // in case user wants to use another welfare var
-	local weight    "weight"
-	local hhid      "hhid"
-	local hsize     "hsize"
-	local year      "year"
-	local datain "\\wbntst01.worldbank.org\TeamDisk\GPWG\datalib\_ado\propov\_projections"
+	if ("`welfvar'" == "") local welfvar "welfare" // in case user wants to use another welfare var
+	local weight "weight"
+	local hhid "hhid"
+	local hsize "hsize"
+	local year "year"
+	* local datain "\\wbntst01.worldbank.org\TeamDisk\GPWG\datalib\_ado\propov\_projections"
+	local maindir "\\gpgfile\mpo\POV"
+	local datain "\\gpgfile\mpo\POV\From_MFM\archives"
 }
 if ("`region'" == "lac") {
-	if ("`welfvar'" == "") local welfvar  "ipcf"	// in case user wants to use another welfare var
+	if ("`welfvar'" == "") local welfvar "ipcf"	// in case user wants to use another welfare var
 	local weight "pondera"
-	local hhid   "id"
-	local hsize  "miembros"
-	local year   "ano"
+	local hhid "id"
+	local hsize "miembros"
+	local year "ano"
 	local datain "Z:\public\Stats_Team\Poverty Projections\data\Projections"
 }
 
@@ -116,14 +181,14 @@ cap findfile scheme-burd.scheme
 cap if _rc ssc install scheme-burd, replace
 cap set scheme burd
 
-preserve
+* preserve
 *------------------------------------0.3: Initial conditions
 
 local yeara: word 1 of `years'				//first year of the period of reference 
 local yearb: word 2 of `years'				//second year of the period of reference (Base line)
 
 
-**********   USING INTERNAL DATALIB 
+********** USING INTERNAL DATALIB 
 if ("`region'" == "lac") datalib_displaysedlac, country(`country') type(sedlac) pro(02)
 
 *********** USING GPWG database
@@ -146,13 +211,13 @@ else {
 	}
 }
 
-if ("`yearb'" != "`yearc'") local years "`years'  `yearc'"
+if ("`yearb'" != "`yearc'") local years "`years' `yearc'"
 if ("`yearc'" < "`yearb'") {
 	noi disp as err "Last year disposable with data (`yearc') cannot be smaller than second year of period of reference (`yearb')"
 	err 197
 }
 /*====================================================================================
-                          1: data with population and GDP
+ 1: data with population and GDP
 ====================================================================================*/
 
 *------------------------------------1.1: Load GDP and population
@@ -162,7 +227,7 @@ if ("`macrodata'" == "") {		// use global Macro data
 	keep if (year >= `=`yeara'-1')
 }
 
-else {		//  use Internal Macro data
+else {		// use Internal Macro data
 	use if (country == "`country'" & year >= `=`yeara'-1') ///
 		using "`macrodata'", clear
 	sort year
@@ -180,22 +245,25 @@ foreach pc in pc t {
 	replace gdp`pc'_tgr = 1 if gdp`pc'_tgr == .
 
 	gen gdp`pc'_cgr = 1 if year <= `yearc'
-	replace gdp`pc'_cgr = gdp`pc'_tgr[_n]*gdp`pc'_cgr[_n-1] ///  cumulative growth
+	replace gdp`pc'_cgr = gdp`pc'_tgr[_n]*gdp`pc'_cgr[_n-1] /// cumulative growth
 		if (gdp`pc'_cgr != 1)	
 	
 	// years to use in calculations
 	local N = _N-1
 	foreach n of numlist 1/`N' {
-		if year[_n+`n'] > `yearc' local gdp`pc'grs "`gdp`pc'grs' `:disp gdp`pc'_cgr[_n+`n']'"
+		if year[_n+`n'] > `yearc' local gdp`pc'_cgrs /// Cumulative growth
+			"`gdp`pc'_cgrs' `:disp gdp`pc'_cgr[_n+`n']'"
+		
+		if year[_n+`n'] > `yearc' local gdp`pc'_tgrs /// annual growth
+			"`gdp`pc'_tgrs' `:disp gdp`pc'_tgr[_n+`n']'"
 	}
 }
 
-
 * Population growth
-gen     pop_tgr = (pop[_n]/pop[_n-1])		// Total growth
-gen     pop_gr = pop_tgr-1					// percentage growth
+gen pop_tgr = (pop[_n]/pop[_n-1])		// Total growth
+gen pop_gr = pop_tgr-1					// percentage growth
 gen pop_cgr = 1 if year <= `yearc'
-replace pop_cgr = pop_tgr[_n]*pop_cgr[_n-1] ///  cumulative growth
+replace pop_cgr = pop_tgr[_n]*pop_cgr[_n-1] /// cumulative growth
 	if (pop_cgr != 1)	
 
 local N = _N-1
@@ -221,36 +289,37 @@ reshape long value, i(year type) j(indicator) string
 ** Labels and names
 
 
-replace type = "Cumulative growth" 					  if type == "cgr"
-replace type = "annual growth"     					  if type == "gr"
-replace type = "annual growth adj by pass-trough"     if type == "grp"
+replace type = "Cumulative growth" 					 if type == "cgr"
+replace type = "annual growth" 					 if type == "gr"
+replace type = "annual growth adj by pass-trough" if type == "grp"
 
-replace indicator = " Total GDP. "       if indicator == "gdp"  
-replace indicator = " GDP per capita. "  if indicator == "gdppc"
-replace indicator = "Population. "      if indicator == "pop"  
+replace indicator = " Total GDP. " if indicator == "gdp" 
+replace indicator = " GDP per capita. " if indicator == "gdppc"
+replace indicator = "Population. " if indicator == "pop" 
 
-label var type      "Type of growth"
-label var value     "growth rates"
-label var year      "Growth projection for "
+label var type "Type of growth"
+label var value "growth rates"
+label var year "Growth projection for "
 label var indicator "Indicator"
 
 * Display
-noi tabdisp type  year ///
+noi tabdisp type year ///
 	if (inlist(year,`yeara',`yearb') | year >= `yearc'), ///
 	c(value) by(indicator) format(%5.3f)
 noi disp in green "Pass-through in use = " in y `passthrough'
  
 /*====================================================================================
-                               2: create quantiles
+ 2: create quantiles
 ====================================================================================*/
 
 *-----------------------------2.0: Load data bases 
 
-**********   USING INTERNAL DATALIB 
+********** USING INTERNAL DATALIB 
 if ("`region'" == "lac") {
 
 * Call both surveys at the same time
-	datalib, countr(`country') year(`years')  clear
+	datalib, countr(`country') year(`years') clear
+	local surveys "`r(surveys)'"
 	keep `year' `welfvar'_ppp `weight' `hhid' `hsize' 
 	renvars `year' `welfvar'_ppp `weight' `hhid' `hsize' \ year welfare weight hhid hsize
 }
@@ -259,15 +328,18 @@ if ("`region'" == "") {			// NOTE: the append option of datlaib2 is not working 
 	
 	if (`yearb' < `yearc') {
 		datalib2, year(`yearc') country(`country') type(gpwg) welfppp(`welfvar') clear
+		local surveys "`surveys' `r(surveys)'"
 		tempfile gpwgsvc
 		save `gpwgsvc'
 	}
 	
 	datalib2, year(`yearb') country(`country') type(gpwg) welfppp(`welfvar') clear
+	local surveys "`surveys' `r(surveys)'"
 	tempfile gpwgsvb
 	save `gpwgsvb'
 	
 	datalib2, year(`yeara') country(`country') type(gpwg) welfppp(`welfvar') clear
+	local surveys "`surveys' `r(surveys)'"
 	append using `gpwgsvb' `gpwgsvc', force
 	
 	keep `year' `welfvar'_ppp `weight' `hhid' `hsize' 
@@ -275,6 +347,7 @@ if ("`region'" == "") {			// NOTE: the append option of datlaib2 is not working 
 	replace welfare = welfare/12		// transform to monthly 
 }
 
+local surveys = upper("`surveys'")
 *-----------------------------2.1: Poverty with Real welfare 
 
 tempname PovGQC
@@ -286,8 +359,8 @@ foreach y of local years {
 }
 
 *-----------------------------2.2: Quantiles
-drop if welfare == .  			//  if wanted, here we can exclude welfare == 0 as well. 
-bysort year (welfare): quantiles welfare [fw = int(weight)], gen(qtl) n(`nq')  keeptog(hhid) // quantiles  
+drop if welfare == . 			// if wanted, here we can exclude welfare == 0 as well. 
+bysort year (welfare): quantiles welfare [fw = int(weight)], gen(qtl) n(`nq') keeptog(hhid) // quantiles 
 
 * save survey of the second year for further procedures
 
@@ -305,13 +378,13 @@ use `svy1', clear
 noi disp _n in y "Contribution of quantiles based on the " ///
 	in green "`contribution'" in y " of welfare of each quantile" _n
 
-collapse (`contribution') welfare [pw = weight], by(year qtl)   // This is the controversial issue
+collapse (`contribution') welfare [pw = weight], by(year qtl) // This is the controversial issue
 
 drop if qtl == .
 reshape wide welfare, i(q) j(year)
 
 /*====================================================================================
-                                  3: Contributions  
+ 3: Contributions 
 ====================================================================================*/
 
 *----------------------------3.1:differences and total
@@ -320,7 +393,7 @@ reshape wide welfare, i(q) j(year)
 gen diffwelfare = welfare`yearb' - welfare`yeara'		// Bins differences
 
 sum diffwelfare
-local totdiff = r(sum)		//  total welfare chance
+local totdiff = r(sum)		// total welfare chance
 
 gen cont = diffwelfare/`totdiff' // contributions 
 label var cont "contribution by quantile"
@@ -337,7 +410,7 @@ merge 1:m qtl using `svy2', nogen
 sort year qtl
 
 /*=====================================================================================
-                                  4: Calculate new welfare
+ 4: Calculate new welfare
 =====================================================================================*/
 
 *----------------------4.1: redistribution of growth 
@@ -359,36 +432,38 @@ if ("`distribution'" == "plutocratic") {
 
 
 *------------------------------4.2: New welfare
-sum welfare`yearc'     [fw = int(weight)] 
-local totwelfareb = r(sum)
-
+rename weight weight`yearc'
 local n = 0 		// number of years to project
-qui foreach gdpgr of numlist `gdp`gdp2use'grs' {
+qui foreach gdpgr of numlist `gdp`gdp2use'_tgrs' {
+
+	sum welfare`=`yearc'+`n'' [fw = int(weight`=`yearc'+`n'')] 
+	local totwelfareb = r(sum)
+
 	local ++n 
 	local expwelfare = `totwelfareb'*`gdpgr'		// Expected welfare for projected year 
 	local welfare2dist = `expwelfare'-`totwelfareb'		// welfare to be distributed
 	
 	** New population
-	gen weight`=`yearc'+`n'' = weight*`: word `n' of `popgrs''
+	gen weight`=`yearc'+`n'' = weight`=`yearc'+`n'-1'*`: word `n' of `popgrs''
 	
-	**  transfer and proportion per household
+	** transfer and proportion per household
 	tempvar trans hhshare 
 	
-	gen `hhshare' = (`wwelfare'/`welfqtl')*(cont/weight`=`yearc'+`n'')  // share of inc to each hh 
+	gen `hhshare' = (`wwelfare'/`welfqtl')*(cont/weight`=`yearc'+`n'') // share of inc to each hh 
 	gen `trans' = `welfare2dist'*`hhshare'			// increase of welfare to each household
-	egen welfare`=`yearc'+`n'' =  rowtotal(welfare`yearc' `trans')
+	egen welfare`=`yearc'+`n'' = rowtotal(welfare`=`yearc'+`n'-1' `trans')
 	
 	* poverty rates
 	foreach povline of local povlines {
 		local line = `povline'*`monthly'
-		apoverty welfare`=`yearc'+`n''  [pw = weight`=`yearc'+`n''], line(`line')
+		apoverty welfare`=`yearc'+`n'' [pw = weight`=`yearc'+`n''], line(`line')
 		mat `PovGQC' = nullmat(`PovGQC')\ `=`yearc'+`n'', `povline', `r(head_1)', 1 
 	} 		// end of pov lines loop
 
-}	//  end of loop for projected years
+}	// end of loop for projected years
 
 /*=====================================================================================
-                       5: Projecting poverty with other methods
+ 5: Projecting poverty with other methods
 =====================================================================================*/
  
 
@@ -419,24 +494,24 @@ svmat `GDPpc', n(col)
 levelsof ys, local(ys)
 
 foreach y of local ys {
-	sum   gr if (ys == `y'), meanonly 	// growth
-	local g`y'  = r(mean)
+	sum gr if (ys == `y'), meanonly 	// growth
+	local g`y' = r(mean)
 
-	sum  cgr if (ys == `y'), meanonly 	// cumulative growth
+	sum cgr if (ys == `y'), meanonly 	// cumulative growth
 	local cg`y' = r(mean)
 	
-	sum  gdp if (ys == `y'), meanonly 	// gdp
+	sum gdp if (ys == `y'), meanonly 	// gdp
 	local gdp`y' = r(mean)
 }
 
-drop  ys gdp gr grp cgr 
+drop ys gdp gr grp cgr 
 
 local a = `gdp`yearb''/`gdp`yeara''
 if ("`annualized'" == "annualized") {
 	local b = 1/(`yearb'-`yeara')
-	local ag = (`a'^`b')-1		//  Annualized GDP growth
+	local ag = (`a'^`b')-1		// Annualized GDP growth
 }
-else local ag = `a'-1		//  Non-Annualized GDP growth
+else local ag = `a'-1		// Non-Annualized GDP growth
 
 
 * Elasticities
@@ -476,7 +551,7 @@ foreach povline of local povlines {
 		if (`y' > `yearc') {
 			tempvar welfare`y'
 			gen `welfare`y'' = welfare`yearc'*`cg`y''				// new welfare
-			apoverty `welfare`y'' [pw = weight`=`yearc'+`n''], line(`=`povline'*`monthly'')
+			apoverty `welfare`y'' [pw = weight`y'], line(`=`povline'*`monthly'')
 			mat `PovGQC' = nullmat(`PovGQC')\ `y', `povline', `r(head_1)', 3
 		}
 	}	// end of years loop
@@ -486,27 +561,135 @@ foreach povline of local povlines {
 *----------------- 5.3. Display all methods
 
 svmat `PovGQC', n(col)
-label define method 0 "Real" 1 "GCQ" 2 "Elasticity" 3 "Neutral Dist.", modify
+label define method 0 "Real" 1 "QGC" 2 "Elasticity" 3 "Neutral Dist.", modify
 label values method method
 
-label var ys        "Year"
-label var povline   "Pov. Line-USD"
-label var rate      "Poverty rate"
-label var method    "Poverty Rate for each Method"
+label var ys "Year"
+label var povline "Pov. Line-USD"
+label var rate "Poverty rate"
+label var method "Poverty Rate for each Method"
 
 noi tabdisp ys method if !missing(ys), c(rate) format(%4.3f) by(povline) center
 
 *----------------- 5.4 Fix data and save
-rename weight weight`yearc'
 
 * save poverty data
-if ("`povdata'" != "") {
+if ("`povdata'" != "" | "`write'" == "write") {
 	tempfile aa
 	save `aa', replace
 	keep ys povline rate method 
 	drop if ys == . 
-	save "`povdata'", `replace'
-	use `aa', clear
+	if ("`povdata'" != "") save "`povdata'", `replace' // save poverty rates data
+	
+	*****************************************
+	** Procedure to write file on MFM folder
+	*****************************************
+	if ("`write'" == "write") {
+
+		*** Section with poverty rates. ***********
+		local Country = upper("`country'")
+		
+		tempname mfm
+		tempfile mfmfile
+		postfile `mfm' double povline str3 Code str12 Indicator str500 Label ///
+			using `mfmfile', replace
+
+		** List of poverty lines
+		local i = 0
+		foreach povline of local povlines {
+			local ++i
+			post `mfm' (`povline') ("`Country'") ("`Country'POV`i'") ///
+			("Poverty rate ($`povline' a day, PPP terms)") 
+		}
+		postclose `mfm'
+
+		** format pov projection info
+		reshape wide rate, i(method povline) j(ys)
+		rename rate* y*
+		keep if inlist(method, 0, 1)
+		collapse (mean) y*, by(povline)
+
+		merge 1:1 povline using `mfmfile', nogen
+		compress
+		drop povline
+		gen N = -1
+		order N Code Indicator Label y*
+
+
+		*** labels
+		tempname mfm
+		tempfile mfmfile
+		postfile `mfm' N str3 Code str12 Indicator str500 Label using `mfmfile', replace
+
+		local yrsv "`yeara'-`: word 1 of `surveys'', `yearb'-`: word 2 of `surveys''"
+		if ("`yearb'" != "`yearc'") local yrsv "`yrsv', `yearc'-`: word 3 of `surveys''"
+
+		post `mfm' (1) ("`Country'") ("`Country'POVFN1") ///
+			("Calculations based on `yrsv' surveys.") 
+
+		post `mfm' (2) ("`Country'") ("`Country'POVFN2") ///
+			("Projection using `method', `yeara'-`yearb' with pass-through = `passthrough' based on GDP constant.") 
+
+		* Footnotes
+
+		* Genal footnotes
+
+		local gfn = 2
+		foreach note in 1 2 3 4 {
+			if ("`gfn`note''" != "") {
+				post `mfm' (`++gfn') ("`Country'") ("`Country'POVFN`gfn'") ("`gfn`note''") 
+			}
+		}
+
+		* Poverty lines notes
+		foreach noteline in 1 2 3 {
+		local plnt = 0
+			foreach note in 1 2 3 4 {
+				if ("`pl`noteline'fn`note''" != "") {
+					post `mfm' (`noteline'`note') ("`Country'") ///
+					("`Country'POV`noteline'FN`++plnt'") ("`pl`noteline'fn`note''") 
+				}
+			}
+		}
+		postclose `mfm'
+
+		append using `mfmfile', force
+		compress
+		sort N
+		drop N
+		
+		***** Country excel file. 
+		
+		export excel using "`maindir'/countries/`country'.xlsx", firstrow(variable) ///
+			sheet("poverty projections") sheetreplace
+		
+		***** Global Excel File
+		
+		ds y*
+		local yvars = r(varlist)
+		local yvars: subinstr local yvars "y" "", all
+		local yvars: subinstr local yvars " " ", ", all
+		local maxyvars = max(`yvars')
+
+		keep Code Indicator Label y2012-y`maxyvars'		// keep global years
+
+		** Import global file, modify with new data and save again. 
+		tempfile _countryfile
+		save `_countryfile', replace
+
+		import excel using "`maindir'/global/global.xlsx", firstrow case(preserve) ///
+			sheet("poverty projections") clear
+
+		drop if Code == "`Country'"
+		append using `_countryfile', force
+
+		export excel using "`maindir'/global/global.xlsx", firstrow(variable) ///
+			sheet("poverty projections") sheetreplace
+		
+		
+	}	// end of write file. 
+	
+	use `aa', clear 		// restore data
 }
 
 * save welfare data
@@ -517,7 +700,7 @@ if ("`welfaredata'" != "") {
 
 
 /*=====================================================================================
-                       6: Density and GICs
+ 6: Density and GICs
 =====================================================================================*/
 
 *-------------------------6.1: Density
@@ -525,19 +708,21 @@ if (regexm("`graph'", "den")) {
 	
 	local lplace = .0009
 	foreach povline of local povlines {
-		local xlines = "`xlines'  `=`povline'*`monthly''"
+		local xlines = "`xlines' `=`povline'*`monthly''"
 		local textlines `"`textlines' text(`lplace' `=`povline'*`monthly'' " `povline' usd", place(e) size(small))"'
 		local lplace = `lplace'-.0003
 	}
 	tempname grdensity
 	twoway (kdensity welfare`yearc' [w = weight`yearc'], range(0 500)) ///
-		   (kdensity welfare`=`yearc'+1' [w = weight`=`yearc'+1'], range(0 500)),  ///
-		xline(`xlines') name(`grdensity') legend(size(small)) ///
-		xtitle("Monthly Welfare USD PPP") title("Kernel Density for `country'") ///
-		legend(label(1 "Welfare `yearc' (real)") label(2 "Welfare `=`yearc'+1' (projected)")) ///
-		`textlines'
+		 (kdensity welfare`=`yearc'+1' [w = weight`=`yearc'+1'], range(0 500)), ///
+		 xline(`xlines') name(`grdensity') legend(size(small)) ///
+		 xtitle("Monthly Welfare USD PPP") ///
+			title(`"Kernel Density for `= upper("`country'")'"') ///
+		 legend(label(1 "Welfare `yearc' (real)") ///
+			label(2 "Welfare `=`yearc'+1' (projected)")) `textlines'
+
 	local grnames "`grnames' `grdensity' "
-}		//  end of condition for density
+}		// end of condition for density
 
 
 *------------------------6.2: Calculation of GICs 
@@ -546,9 +731,9 @@ if (inlist("`graph'", "gic", "cont")) {
 	gen n = _n
 	reshape long weight welfare, i(n qtl) j(year)
 	drop n
-	collapse (mean) welfare [pw = weight], by(year qtl)   
+	collapse (mean) welfare [pw = weight], by(year qtl) 
 	reshape wide welfare, i(qtl) j(year)
-	merge 1:1 qtl using `qtlsvys', nogen  keepusing(welfare`yeara' welfare`yearb' cont)
+	merge 1:1 qtl using `qtlsvys', nogen keepusing(welfare`yeara' welfare`yearb' cont)
 
 	* GICs
 	gen gic = 100*((welfare`yearb'/welfare`yeara')^(1/(`yearb'-`yeara'))-1)
@@ -566,8 +751,8 @@ if (inlist("`graph'", "gic", "cont")) {
 		label var welfare`=`yearc'+`y'' "welfare `=`yearc'+`y'' (projected)"
 	}
 	label var cont "% Quantile contribution to growth"
-	label var gic    "% GIC (real `yeara'-`yearb')"
-	label var gicp  "% GIC (projected `yearc'-`=`yearc'+1')"
+	label var gic "% GIC (real `yeara'-`yearb')"
+	label var gicp "% GIC (projected `yearc'-`=`yearc'+1')"
 
 	** Display graphs
 	if (regexm("`graph'", "gic")) {
@@ -589,7 +774,7 @@ if (wordcount("`grnames'")>1) graph combine `grnames'
 
 order qtl welfare*
 /*=====================================================================================
-                              7: Organizing Results
+ 7: Organizing Results
 =====================================================================================*/
 
 tempname GIC_wide GIC_long
@@ -608,12 +793,12 @@ if (inlist("`graph'", "gic", "cont")) {
 
 * growth per capita, Total growth, and population
 
-mat colnames `GDP'   = year gdp grwoth gr_pass-thr cumulative_gr
+mat colnames `GDP' = year gdp grwoth gr_pass-thr cumulative_gr
 mat colnames `GDPpc' = year gdppc grwoth gr_pass-thr cumulative_gr
-mat colnames `POP'   = year pop growth cumulative_gr 
-return matrix GDP    = `GDP'
-return matrix GDPpc  = `GDPpc'
-return matrix POP    = `POP'
+mat colnames `POP' = year pop growth cumulative_gr 
+return matrix GDP = `GDP'
+return matrix GDPpc = `GDPpc'
+return matrix POP = `POP'
 
  
 * Poverty
@@ -625,21 +810,21 @@ return matrix Pov = `PovGQC'
 mat colnames `E' = povline elasticity
 return matrix Elasticity = `E'
 
-restore
+* restore
 }	// end qui
 
 end
 
 /*=====================================================================================
-         8: Program to get last available year for specified country in GPWG portal
+ 8: Program to get last available year for specified country in GPWG portal
 =====================================================================================*/
 
 
 program define datalib2_years, rclass
-syntax  anything(name=countrycode)
+syntax anything(name=countrycode)
 
 qui {
-local countrycode  = upper("`countrycode'")
+local countrycode = upper("`countrycode'")
 
 local a1 "ASM AUS BRN CHN FJI FSM GUM HKG IDN JPN KHM KIR KOR LAO MAC MHL MMR MNG MNP MYS NCL NZL PHL PLW PNG PRK PYF SGP SLB THA TLS TON TUV VNM VUT WSM"
 lstrfun b, regexms("`a1'", "^.*([ \t]?)(`countrycode')(.*)$",2)
@@ -649,7 +834,7 @@ local a2 "ALB AND ARM AUT AZE BEL BGR BIH BLR CHE CHI CYP CZE DEU DNK ESP EST FI
 lstrfun b, regexms("`a2'", "^.*([ \t]?)(`countrycode')(.*)$",2)
 if ("`b'" == "`countrycode'") local reg "ECA"
 
-   	local a3 "ABW ARG ATG BHS BLZ BOL BRA BRB CHL COL CRI CUB CUW CYM DMA DOM ECU GRD GTM GUY HND HTI JAM KNA LCA MEX NIC PAN PER PRI PRY SLV SUR TCA TTO URY VCT VEN VIR SXM MAF"
+ 	local a3 "ABW ARG ATG BHS BLZ BOL BRA BRB CHL COL CRI CUB CUW CYM DMA DOM ECU GRD GTM GUY HND HTI JAM KNA LCA MEX NIC PAN PER PRI PRY SLV SUR TCA TTO URY VCT VEN VIR SXM MAF"
 lstrfun b, regexms("`a3'", "^.*([ \t]?)(`countrycode')(.*)$",2)
 if ("`b'" == "`countrycode'") local reg "LAC"
 
@@ -675,7 +860,7 @@ disp `"`folders'"'
 
 local years ""
 foreach folder of local folders {
-	if regexm("`folder'", "^([a-z]+_)([0-9]+)_*") local year  = regexs(2)
+	if regexm("`folder'", "^([a-z]+_)([0-9]+)_*") local year = regexs(2)
 	local years "`years' `year'"
 }
 
@@ -684,13 +869,13 @@ return local years "`years'"
 end
 
 /*=====================================================================================
-         9: Program to retrieve Macro data
+ 9: Program to retrieve Macro data
 =====================================================================================*/
 
 
 
 program define propov_macrodata, rclass
-syntax  anything(name=countrycode),		///
+syntax anything(name=countrycode),		///
 				datain(string)			///
 				[ indicator(string) ]
 
@@ -703,40 +888,40 @@ drop _all
 if ("`indicator'" == "") local indicator="gdp" 
 
 /*=======================================================================================
-                         Section 1: Open and organize the data    
+ Section 1: Open and organize the data 
 ========================================================================================*/
 
 *1.1 Open GDP
 
 if "`indicator'"=="gdp"{
 	import delimited "`datain'/`countrycode'.csv", clear //Extract the GDP data base
-	keep if indicatorcode=="NYGDPMKTPKN"           //I only keep the GDP 
+	keep if indicatorcode=="NYGDPMKTPKN" //I only keep the GDP 
 	
-	destring yr1960- yr2025, replace force         //Destring the data (everything was sent as string by MFM)
-	gen country=lower(countrycode)                 // Generate the country code
-	keep country yr2000- yr2016                    // Keep only the country code and the estimations for all the period that could be of interest (andres si queres esto reducilo a menos anos)
-	reshape long yr, i( country ) j(year)          //Make the data in long style
-	rename yr `indicator'                          // rename the variable names
-	sort country year                              // rename the variable names
+	destring yr1960- yr2025, replace force //Destring the data (everything was sent as string by MFM)
+	gen country=lower(countrycode) // Generate the country code
+	keep country yr2000- yr2016 // Keep only the country code and the estimations for all the period that could be of interest (andres si queres esto reducilo a menos anos)
+	reshape long yr, i( country ) j(year) //Make the data in long style
+	rename yr `indicator' // rename the variable names
+	sort country year // rename the variable names
 	
-	tempfile gdp                                   // set temporary file name
-	save `gdp', replace                            // save data
+	tempfile gdp // set temporary file name
+	save `gdp', replace // save data
 }
 
 if "`indicator'"=="consumption"{
 	import delimited "`datain'/`countrycode'.csv", clear //Extract the GDP data base
 	
-	keep if indicatorcode=="NECONPRVTKN"           //I only keep the Consumption 
-	gen country=lower(countrycode)                 // Generate the country code
-	aorder                                         //order variables in data
-	keep country yr2000- yr2016	                   // Keep only the country code and the estimations for all the period that could be of interest (andres si queres esto reducilo a menos anos)
-	destring yr2000- yr2016, replace force         //Destring the data (everything was sent as string by MFM)
-	reshape long yr, i( country ) j(year)          //Make the data in long style
-	rename yr `indicator'                          // change the variable names
-	sort country year                              // change the variable names
+	keep if indicatorcode=="NECONPRVTKN" //I only keep the Consumption 
+	gen country=lower(countrycode) // Generate the country code
+	aorder //order variables in data
+	keep country yr2000- yr2016	 // Keep only the country code and the estimations for all the period that could be of interest (andres si queres esto reducilo a menos anos)
+	destring yr2000- yr2016, replace force //Destring the data (everything was sent as string by MFM)
+	reshape long yr, i( country ) j(year) //Make the data in long style
+	rename yr `indicator' // change the variable names
+	sort country year // change the variable names
 	
-	tempfile gdp                                   // set temporary file name
-	save `gdp', replace                            // save data
+	tempfile gdp // set temporary file name
+	save `gdp', replace // save data
 }
 
 /*
@@ -748,21 +933,21 @@ else{
 
 *1.2 Open Population
 
-import excel using "`datain'/HNPS_all_countries.xlsx", sheet("Data")   ///  Health Nutrition and Population Statistics All countrycode
+import excel using "`datain'/HNPS_all_countries.xlsx", sheet("Data") /// Health Nutrition and Population Statistics All countrycode
 	firstrow clear 
 
-gen country=lower(CountryCode)                     // Gen the country code 
-keep if country=="`countrycode'"                   // Keep the country of interest
-aorder                                             //order variables in data
-keep country YR2000- YR2016                        // Keep the variables of interest
-destring YR2000- YR2016, replace force             //Destring the data (everything was sent as string by MFM)
-reshape long YR, i( country ) j(year)              // Make the data in long style
-keep country year YR                               // Keep the variables of interest
-rename YR pop                                      // change the variable names
-sort country year                                  // sort data
+gen country=lower(CountryCode) // Gen the country code 
+keep if country=="`countrycode'" // Keep the country of interest
+aorder //order variables in data
+keep country YR2000- YR2016 // Keep the variables of interest
+destring YR2000- YR2016, replace force //Destring the data (everything was sent as string by MFM)
+reshape long YR, i( country ) j(year) // Make the data in long style
+keep country year YR // Keep the variables of interest
+rename YR pop // change the variable names
+sort country year // sort data
 
-tempfile population                                // set temporary file name
-save `population', replace                         // save data
+tempfile population // set temporary file name
+save `population', replace // save data
 
 *1.3 Merge and organize
 merge 1:1 country year using `gdp', nogen
@@ -783,6 +968,9 @@ exit
 Notes:
 1. History of the file 
 
+v BETA: 2.2.1	<24Mar2015>
+	add option macrodata for selection of GDP projection
+	Add option to modifying monthly conversion
 v BETA: 2.1.1	<02Mar2015>		
 	add missing "else" in elasticity section
 	change all [fw = weight] for [fw = int(weight)]
@@ -806,7 +994,7 @@ v 1.0.1	<11Feb2015>		<Andres Castaneda>
 
 exit 
 discard
-propov, countr(pry) period(2005 2011)  grden nq(20)  dist(democratic) povdata(arg05-11)
+propov, countr(pry) period(2005 2011) grden nq(20) dist(democratic) povdata(arg05-11)
 
 
 if (lower("`region'") != "lac") net from "\\wbntst01.worldbank.org\TeamDisk\GPWG\datalib\_ado"
